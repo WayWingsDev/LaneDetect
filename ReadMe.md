@@ -1,6 +1,6 @@
-# 车道线检测
-## 基本过程
-分类器
-车道初选
-车道跟踪
-下帧状态判断
+## Lane Detection
+### Basic steps
+- CascadeClassifier
+- Lane fitting
+- Lane tracking
+- Status prediction

@@ -6,7 +6,7 @@
 #include <iostream>
 #include <numeric>
 
-#define cascadeName "LBPcascade_lane2.xml"
+#define cascadeName "LBPcascade_lane.xml"
 #define Y_SKYLINE 0.3		//地平线高度
 
 // public part
@@ -40,12 +40,16 @@ void LaneDetection::initSys()
 
 void LaneDetection::process(Mat& frame)
 {
-	OFrame = frame.clone();		//备份原始图像
+	OFrame = frame.clone();		// copy of the origin frame
 
-	if (departuring == 0)		//正常行驶状态
+	searchROI = frameInit();
+	getCandidatePoints();
+	getCannyArea();
+
+	/*
+	if (departuring == 0)
 	{
-		// 图像准备
-		searchROI = frameInit(frame, SFrame);
+		
 		// 分类器搜索
 		getCandidatePoints(SFrame, lanePoints);
 		// 边缘检测
@@ -57,8 +61,7 @@ void LaneDetection::process(Mat& frame)
 	}
 	else						//偏离换道状态
 	{
-		// 图像准备
-		searchROI = frameInit(frame, SFrame);
+
 		// 分类器搜索
 		getCandidatePoints(SFrame, lanePoints);
 		// 边缘检测
@@ -67,11 +70,16 @@ void LaneDetection::process(Mat& frame)
 		getCandidateLinesDepart(SFrame, lanePoints, fitPoints);
 		// 跟踪修正
 		getTrackedLinesDepart(SFrame);
-	}	
+	}
+	*/
 }
 
 void LaneDetection::drawLanes(Mat& frame)
 {
+	imshow("Mask", mask);
+	imshow("Canny", edge);
+	
+	/*
 	if (departuring == 0)
 	{
 		//初选线
@@ -100,8 +108,7 @@ void LaneDetection::drawLanes(Mat& frame)
 		plotLanes(frameShow, lanesPV.MLane);
 		imshow("LD", frameShow);
 	}
-		
-	waitKey();
+	*/
 }
 
 // 下帧预测
@@ -109,7 +116,7 @@ void LaneDetection::nextFrame()
 {
 	//更新偏离状态的指示
 	int sum = accumulate(begin(dDirection), end(dDirection), 0.0);
-	cout << "Sum = " << sum << endl; 
+	//cout << "Sum = " << sum << endl; 
 
 	if (departuring == 0)				//当前为正常行驶
 	{
@@ -205,12 +212,10 @@ void LaneDetection::nextFrame()
 		}
 
 	}
-
-	cout << "Departure: " << departuring << endl;
+	//cout << "Departure: " << departuring << endl;
 }
 
 // private part
-// 初始化
 void LaneDetection::initTransMatrix()
 {
 	Point2f src[4];
@@ -258,40 +263,34 @@ void LaneDetection::initTransMatrix()
 	}
 }
 
-// 图像准备
-Rect LaneDetection::frameInit(Mat& inFrame, Mat& outFrame)
+Rect LaneDetection::frameInit()
 {
-	// 缩小后图像
-	resize(inFrame, outFrame, Size(OFrame.cols / 2, OFrame.rows / 2));
-	// 去黑边
-	outFrame = outFrame(Rect(0, 10, outFrame.cols - 10, outFrame.rows - 10));
-	frameSize = outFrame.size();
-	// 搜索区域定义
+	cvtColor(OFrame, OFrame, CV_BGR2GRAY);
+	resize(OFrame, SFrame, Size(OFrame.cols / 2, OFrame.rows / 2));
+	SFrame = SFrame(Rect(0, 10, SFrame.cols - 10, SFrame.rows - 10));
+	frameSize = SFrame.size();
+	// define searchROI
 	if (departuring == 0)
 	{
-		Rect searchROI(0, Y_SKYLINE*outFrame.rows, outFrame.cols, (1 - Y_SKYLINE - 0.1)*outFrame.rows);
+		Rect searchROI(0, Y_SKYLINE*SFrame.rows, SFrame.cols, (1 - Y_SKYLINE - 0.1)*SFrame.rows);
 		return searchROI;
 	}
 	else if (departuring == -1)
 	{
-		Rect searchROI(0.25*outFrame.cols, Y_SKYLINE*outFrame.rows, 0.75*outFrame.cols, (1 - Y_SKYLINE)*outFrame.rows);
+		Rect searchROI(0.25*SFrame.cols, Y_SKYLINE*SFrame.rows, 0.75*SFrame.cols, (1 - Y_SKYLINE)*SFrame.rows);
 		return searchROI;
 	}
 	else if (departuring == 1)
 	{
-		Rect searchROI(0.25*outFrame.cols, Y_SKYLINE*outFrame.rows, 0.75*outFrame.cols, (1 - Y_SKYLINE)*outFrame.rows);
+		Rect searchROI(0.25*SFrame.cols, Y_SKYLINE*SFrame.rows, 0.75*SFrame.cols, (1 - Y_SKYLINE)*SFrame.rows);
 		return searchROI;
 	}
 }
 
-// 分类器搜索
-void LaneDetection::getCandidatePoints(Mat& frame, vector<Point>& ps)
+void LaneDetection::getCandidatePoints()
 {
-	double t0;
-	t0 = (double)cvGetTickCount();
-
-	Mat frameROI = frame(searchROI);
-	ps.clear();
+	Mat frameROI = SFrame(searchROI);
+	lanePoints.clear();
 	vector<Rect> laneTargets;
 	cascade.detectMultiScale(frameROI, laneTargets, 1.4, 1, 0, Size(30, 30), Size(60, 60));
 
@@ -300,58 +299,33 @@ void LaneDetection::getCandidatePoints(Mat& frame, vector<Point>& ps)
 		Point plotPoint;
 		plotPoint.x = laneTargets[i].x + laneTargets[i].width / 2 + searchROI.x;
 		plotPoint.y = laneTargets[i].y + laneTargets[i].height / 2 + searchROI.y;
-		ps.push_back(plotPoint);
+		lanePoints.push_back(plotPoint);
 	}
-
-	t0 = (double)cvGetTickCount() - t0;
-	t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	cout << "时间消耗：Cascade Time = " << t0 << " ms" << endl;
 }
 
-// 边缘检测
-void LaneDetection::getCannyArea(Mat& frame, Mat& eFrame, Rect searchROI, vector<Point>& ps)
+void LaneDetection::getCannyArea()
 {
-	double t0;
-	t0 = (double)cvGetTickCount();
-
-	//计算图像掩码
-	Mat mask = Mat::zeros(frame.size(), CV_8U);
+	// mask
+	mask = Mat::zeros(frameSize, CV_8U);
 	if (departuring == 0)
 	{
-		//修正点，去除两条线之间的误检点
-		vector<Point> psNew;
-		delErrorPoints(ps, psNew);
-		//Mask		
-		processMask(mask, psNew);
+		delErrorPoints(lanePoints, selectedPoints);		
+		processMask(mask, selectedPoints);
 	}
 	else
 	{
-		//修正点，去除两条线之间的误检点
-		vector<Point> psNew;
-		delErrorPointsDepart(ps, psNew);
-		//Mask		
-		processMaskDepart(mask, psNew);
+		delErrorPointsDepart(lanePoints, selectedPoints);
+		processMaskDepart(mask, selectedPoints);
 	}
 	
-	//Canny
-	Mat frameGrey;
-	cvtColor(frame, frameGrey, CV_RGB2GRAY);
-	Mat frameCanny = Mat::zeros(frameGrey.size(), CV_8U);
-	Mat frameROI = frameGrey(searchROI);
-	Mat cannyROI = frameCanny(searchROI);
+	// canny
+	Mat frameROI = SFrame(searchROI);
+	cannyFrame = Mat::zeros(frameSize, CV_8U);
+	Mat cannyROI = cannyFrame(searchROI);
 	Canny(frameROI, cannyROI, 20, 120, 3, false);
 
-	//Copy
-	Mat edge = Mat::zeros(frame.size(), CV_8U);
-	frameCanny.copyTo(edge, mask);
-	eFrame = edge;
-
-	t0 = (double)cvGetTickCount() - t0;
-	t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	cout << "时间消耗：Canny Time = " << t0 << " ms" << endl;
-
-	imshow("Mask", mask);
-	imshow("Canny", eFrame);
+	edge = Mat::zeros(frameSize, CV_8U);
+	cannyFrame.copyTo(edge, mask);
 }
 
 void LaneDetection::processMask(Mat& mask, vector<Point>& points)
@@ -394,13 +368,12 @@ void LaneDetection::plotQuadMask(Mat& mask, Vec4f line)
 void LaneDetection::delErrorPoints(vector<Point>& ps0, vector<Point>& ps)
 {
 	ps.clear();
-	if (lanesPV.LLane_p[1] != 0 && lanesPV.RLane_p[1] != 0)	//上一帧两侧线都存在
+	if (lanesPV.LLane_p[1] != 0 && lanesPV.RLane_p[1] != 0)
 	{
 		for (unsigned i = 0; i < ps0.size(); i++)
 		{
 			int dist1 = dist2line(ps0[i], lanesPV.LLane_p);
 			int dist2 = dist2line(ps0[i], lanesPV.RLane_p);
-			//cout << "dist1=" << dist1 << ", dist2=" << dist2 << endl;
 			
 			if (dist1 < 200 || dist2 < 200)
 			{
@@ -417,12 +390,11 @@ void LaneDetection::delErrorPoints(vector<Point>& ps0, vector<Point>& ps)
 void LaneDetection::delErrorPointsDepart(vector<Point>& ps0, vector<Point>& ps)
 {
 	ps.clear();
-	if (lanesPV.MLane_p[1] != 0)	//上一帧存在
+	if (lanesPV.MLane_p[1] != 0)	
 	{
 		for (unsigned i = 0; i < ps0.size(); i++)
 		{
 			int dist = dist2line(ps0[i], lanesPV.MLane_p);
-			cout << "dist=" << dist << endl;
 
 			if (dist < 200)
 			{
@@ -436,50 +408,39 @@ void LaneDetection::delErrorPointsDepart(vector<Point>& ps0, vector<Point>& ps)
 	}
 }
 
-// 车道初选
-void LaneDetection::getCandidateLines(Mat& frame, vector<Point>& ps, vector<Point>& fitPoints)
-{
-	double t0;
-	t0 = (double)cvGetTickCount();
-	
-	//计算灰度梯度
-	Mat frameGrey = frame(searchROI);
-	cvtColor(frameGrey, frameGrey, CV_RGB2GRAY);
 
-	//X方向
+void LaneDetection::getCandidateLines()
+{
+	Mat frameGrey = SFrame(searchROI);
+
+	// x-direction
 	Mat maskX = (Mat_<char>(3, 3) << -1, 0, 1, -2, 0, 2, -1, 0, 1);
 	filter2D(frameGrey, xFrame, CV_32F, maskX);
-	Mat xFrame2 = xFrame.mul(xFrame);
+	xFrame2 = xFrame.mul(xFrame);
 
-	//Y方向
+	// y-direction
 	Mat maskY = (Mat_<char>(3, 3) << -1, -2, -1, 0, 0, 0, 1, 2, 1);
 	filter2D(frameGrey, yFrame, CV_32F, maskY);
-	Mat yFrame2 = yFrame.mul(yFrame);
+	yFrame2 = yFrame.mul(yFrame);
 
-	//梯度值
+	// gradient
 	gFrame2 = xFrame2 + yFrame2;
 	sqrt(gFrame2, gFrame);
-
-	//方向值（正切值）
 	tanFrame = yFrame / xFrame;
 
-	//Canny图像预处理
 	Mat element(3, 3, CV_8U, Scalar(1));
 	dilate(edgeFrame, edge, element);
 
-	//显示梯度计算结果
-	Mat gradientU = Mat::zeros(searchROI.height, searchROI.width, CV_8U);
-	Mat gradientD = Mat::zeros(searchROI.height, searchROI.width, CV_8U);
-
-	//拟合点分组
+	// state of lane keeping 
+	gradientU = Mat::zeros(searchROI.height, searchROI.width, CV_8U);
+	gradientD = Mat::zeros(searchROI.height, searchROI.width, CV_8U);
 	vector<Point> fitPointsLU;
 	vector<Point> fitPointsLD;
 	vector<Point> fitPointsRU;
 	vector<Point> fitPointsRD;
 
-	//int xDivide = binSplitLaneArea(frame, ps);
-	int xDivide = frame.cols / 2;
-	int dx = frame.cols - xDivide;
+	int xDivide = SFrame.cols / 2;
+	int dx = SFrame.cols - xDivide;
 	int y1 = searchROI.y;
 	int dy = searchROI.height;
 
@@ -493,10 +454,10 @@ void LaneDetection::getCandidateLines(Mat& frame, vector<Point>& ps, vector<Poin
 	singleSideLines(areaL, fitLinesL, GLU, GLD, fitPointsLU, fitPointsLD, Point(0, y1));
 	singleSideLines(areaR, fitLinesR, GRU, GRD, fitPointsRU, fitPointsRD, Point(xDivide, y1));
 
-	lanesPV.reliablity[0] = fitPointsLU.size();
-	lanesPV.reliablity[1] = fitPointsLD.size();
-	lanesPV.reliablity[2] = fitPointsRU.size();
-	lanesPV.reliablity[3] = fitPointsRD.size();
+	lanesPV.relia[0] = fitPointsLU.size();
+	lanesPV.relia[1] = fitPointsLD.size();
+	lanesPV.relia[2] = fitPointsRU.size();
+	lanesPV.relia[3] = fitPointsRD.size();
 
 	fitPoints.clear();
 	fitPoints.insert(fitPoints.end(), fitPointsLU.begin(), fitPointsLU.end());
@@ -504,37 +465,26 @@ void LaneDetection::getCandidateLines(Mat& frame, vector<Point>& ps, vector<Poin
 	fitPoints.insert(fitPoints.end(), fitPointsRU.begin(), fitPointsRU.end());
 	fitPoints.insert(fitPoints.end(), fitPointsRD.begin(), fitPointsRD.end());
 
-	//cout << "LP: " << lanesPV.LLane_p << endl;
-	//cout << "LU: " << fitLinesL[0] << endl;
-	//cout << "LD: " << fitLinesL[1] << endl;
-	//cout << "RP: " << lanesPV.RLane_p << endl;
-	//cout << "RU: " << fitLinesR[0] << endl;
-	//cout << "RD: " << fitLinesR[1] << endl;
-
-	t0 = (double)cvGetTickCount() - t0;
-	t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
-
 	imshow("GradientU", gradientU);
 	imshow("GradientD", gradientD);
 }
 
-void LaneDetection::singleSideLines(Rect area, vector<Vec4f>& fitLines, Mat& GU, Mat& GD, vector<Point>& fitPointsU, vector<Point>& fitPointsD, Point move)
+void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Mat& GD, vector<Point>& fitPointsU, vector<Point>& fitPointsD, Point move)
 {
 	fitPointsU.clear();
 	fitPointsD.clear();
 	
-	//区域选取
+	// area selecting
 	Mat areaEdge = edge(searchROI)(area);
 	Mat areaY = yFrame(area);
 	Mat areaG = gFrame(area);
 	Mat areaTan = tanFrame(area);
 	 
-	//统计方向梯度
+	// calc the oriented-gradient
 	float angleStep = CV_PI / 9;
 	float gHist[9] = { 0 };
 	int gNumHist[9] = { 0 };
-	Mat selectedPoints = Mat::zeros(areaTan.rows, areaTan.cols, CV_8U);
+	selected = Mat::zeros(areaTan.rows, areaTan.cols, CV_8U);
 	float* pTan;	// Angle
 	float* pY;		// Y Gradient
 	float* pG;		// Gradient
@@ -633,9 +583,8 @@ void LaneDetection::singleSideLines(Rect area, vector<Vec4f>& fitLines, Mat& GU,
 		fitLineWeighted(fitPointsD, fitLinesD);
 	}
 
-	fitLines.clear();
-	fitLines.push_back(fitLinesU);
-	fitLines.push_back(fitLinesD);
+	fitLines[0] = fitLinesU;
+	fitLines[1] = fitLinesD;
 }
 
 int LaneDetection::binSplitLaneArea(Mat& frame, vector<Point>& ps)
@@ -646,8 +595,8 @@ int LaneDetection::binSplitLaneArea(Mat& frame, vector<Point>& ps)
 // 跟踪修正
 void LaneDetection::getTrackedLines(Mat& frame)
 {
-	double t0;
-	t0 = (double)cvGetTickCount();
+	//double t0;
+	//t0 = (double)cvGetTickCount();
 	
 	Vec4f LLane;
 	Vec4f RLane;
@@ -665,9 +614,9 @@ void LaneDetection::getTrackedLines(Mat& frame)
 	rightP = parallelTest(lanesPV.RLane_p, fitLinesR, frame.size(), lanesPV.confirmed[1]);
 
 	//输出初步结果
-	//cout << "Fit Line Reliablity: " << lanesPV.reliablity[0] << ", " << lanesPV.reliablity[1] << ", " << lanesPV.reliablity[2] << ", " << lanesPV.reliablity[3] << endl;
-	LLane = mergeLines(lanesPV.LLane_p, fitLinesL, leftP, lanesPV.reliablity[0], lanesPV.reliablity[1]);
-	RLane = mergeLines(lanesPV.RLane_p, fitLinesR, rightP, lanesPV.reliablity[2], lanesPV.reliablity[3]);
+	//cout << "Fit Line relia: " << lanesPV.relia[0] << ", " << lanesPV.relia[1] << ", " << lanesPV.relia[2] << ", " << lanesPV.relia[3] << endl;
+	LLane = mergeLines(lanesPV.LLane_p, fitLinesL, leftP, lanesPV.relia[0], lanesPV.relia[1]);
+	RLane = mergeLines(lanesPV.RLane_p, fitLinesR, rightP, lanesPV.relia[2], lanesPV.relia[3]);
 
 	//cout << "LLane: " << LLane << endl;
 	//cout << "RLane: " << RLane << endl;
@@ -687,7 +636,7 @@ void LaneDetection::getTrackedLines(Mat& frame)
 	//补充单边缺失的情况
 	if (lanesPV.tracked[0] == true && lanesPV.tracked[1] == false)	//左有右无
 	{
-		if (lanesPV.reliablity[0] + lanesPV.reliablity[1] > 150)
+		if (lanesPV.relia[0] + lanesPV.relia[1] > 150)
 		{
 			RLane = getOtherSideLane(LLane, 110, frame.size());
 		}
@@ -695,7 +644,7 @@ void LaneDetection::getTrackedLines(Mat& frame)
 
 	if (lanesPV.tracked[0] == false && lanesPV.tracked[1] == true)	//左无右有
 	{
-		if (lanesPV.reliablity[2] + lanesPV.reliablity[3] > 150)
+		if (lanesPV.relia[2] + lanesPV.relia[3] > 150)
 		{
 			LLane = getOtherSideLane(RLane, -110, frame.size());
 		}
@@ -760,9 +709,9 @@ void LaneDetection::getTrackedLines(Mat& frame)
 	}
 	imshow("BV", tFrame);
 
-	t0 = (double)cvGetTickCount() - t0;
-	t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	cout << "时间消耗：Track Time = " << t0 << " ms" << endl;
+	//t0 = (double)cvGetTickCount() - t0;
+	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
+	//cout << "时间消耗：Track Time = " << t0 << " ms" << endl;
 }
 
 int LaneDetection::parallelTest(Vec4f line0, vector<Vec4f>& lines, Size frameSize, bool confirmed)
@@ -979,9 +928,9 @@ void LaneDetection::calcDepartDirection(deque<int>& dDirection)
 			dR = alpha - alpha_p;
 		}
 
-		cout << "dL = " << dL << endl;
-		cout << "dR = " << dR << endl;
-		cout << "dL+dR = " << dL + dR << endl;
+		//cout << "dL = " << dL << endl;
+		//cout << "dR = " << dR << endl;
+		//cout << "dL+dR = " << dL + dR << endl;
 
 		if (dL + dR > 0)
 		{
@@ -1010,7 +959,7 @@ void LaneDetection::calcDepartDirection(deque<int>& dDirection)
 			dM = alpha - alpha_p;
 		}
 
-		cout << "dM = " << dM << endl;
+		//cout << "dM = " << dM << endl;
 
 		if (dM > 0)
 		{
@@ -1237,8 +1186,8 @@ void LaneDetection::processMaskDepart(Mat& mask, vector<Point>& points)
 
 void LaneDetection::getCandidateLinesDepart(Mat& frame, vector<Point>& ps, vector<Point>& fitPoints)
 {
-	double t0;
-	t0 = (double)cvGetTickCount();
+	//double t0;
+	//t0 = (double)cvGetTickCount();
 	
 	//计算灰度梯度
 	Mat frameGrey = frame(searchROI);
@@ -1279,12 +1228,12 @@ void LaneDetection::getCandidateLinesDepart(Mat& frame, vector<Point>& ps, vecto
 
 	singleSideLinesDepart(fitLinesM, GL, GR,  fitPointsL, fitPointsR, move);
 
-	cout << "MP: " << lanesPV.MLane_p << endl;
-	cout << "ML: " << fitLinesM[0] << endl;
-	cout << "MR: " << fitLinesM[1] << endl;
+	//cout << "MP: " << lanesPV.MLane_p << endl;
+	//cout << "ML: " << fitLinesM[0] << endl;
+	//cout << "MR: " << fitLinesM[1] << endl;
 
-	lanesPV.reliablity[0] = fitPointsL.size();
-	lanesPV.reliablity[1] = fitPointsR.size();
+	lanesPV.relia[0] = fitPointsL.size();
+	lanesPV.relia[1] = fitPointsR.size();
 
 	fitPoints.clear();
 	fitPoints.insert(fitPoints.end(), fitPointsL.begin(), fitPointsL.end());
@@ -1293,9 +1242,9 @@ void LaneDetection::getCandidateLinesDepart(Mat& frame, vector<Point>& ps, vecto
 	plotSingleLine(gradientL, fitLinesM[0], 500);
 	plotSingleLine(gradientR, fitLinesM[1], 500);
 
-	t0 = (double)cvGetTickCount() - t0;
-	t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
+	//t0 = (double)cvGetTickCount() - t0;
+	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
+	//cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
 
 	imshow("GradientU", gradientL);
 	imshow("GradientD", gradientR);
@@ -1423,8 +1372,8 @@ void LaneDetection::singleSideLinesDepart(vector<Vec4f>& fitLines, Mat& GL, Mat&
 
 void LaneDetection::getTrackedLinesDepart(Mat& frame)
 {
-	double t0;
-	t0 = (double)cvGetTickCount();
+	//double t0;
+	//t0 = (double)cvGetTickCount();
 	
 	Vec4f MLane;
 
@@ -1437,10 +1386,10 @@ void LaneDetection::getTrackedLinesDepart(Mat& frame)
 	int midP = parallelTest(lanesPV.MLane_p, fitLinesM, frame.size(), lanesPV.confirmed[0]);
 
 	//输出初步结果
-	MLane = mergeLines(lanesPV.MLane_p, fitLinesM, midP, lanesPV.reliablity[0], lanesPV.reliablity[1]);
+	MLane = mergeLines(lanesPV.MLane_p, fitLinesM, midP, lanesPV.relia[0], lanesPV.relia[1]);
 
-	cout << "Ptest:" << midP << endl;
-	cout << "MLane: " << MLane << endl;
+	//cout << "Ptest:" << midP << endl;
+	//cout << "MLane: " << MLane << endl;
 
 	//更新tracked参数
 	if (MLane[0] != 0 && MLane[1] != 0)
@@ -1448,7 +1397,7 @@ void LaneDetection::getTrackedLinesDepart(Mat& frame)
 		lanesPV.tracked[0] = true;
 	}
 
-	cout << "Tracked: " << lanesPV.tracked[0]  << endl;
+	//cout << "Tracked: " << lanesPV.tracked[0]  << endl;
 
 	//跟踪上一帧目标
 	if (lanesPV.MLane_p[0] != 0 && lanesPV.confirmed[0])
@@ -1461,7 +1410,7 @@ void LaneDetection::getTrackedLinesDepart(Mat& frame)
 		lanesPV.MLane = MLane;
 	}
 
-	cout << "MLane: " << lanesPV.MLane << endl;
+	//cout << "MLane: " << lanesPV.MLane << endl;
 
 	//计算偏离趋势
 	calcDepartDirection(dDirection);
@@ -1489,10 +1438,9 @@ void LaneDetection::getTrackedLinesDepart(Mat& frame)
 	}
 	imshow("BV", tFrame);
 
-	t0 = (double)cvGetTickCount() - t0;
-	t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
+	//t0 = (double)cvGetTickCount() - t0;
+	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
+	//cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
 
 }
-
 
