@@ -33,7 +33,6 @@ public:
 	void initSys();
 	void process(Mat& frame);
 	void drawLanes(Mat& frame);
-	void nextFrame();
 
 private:
 	// Data Part
@@ -55,12 +54,13 @@ private:
 	Mat tanFrame;
 	Mat gradientU;
 	Mat gradientD;
-	Mat selected;
+	Mat gradient;
+	Mat selected;					// frame for line-fitting
 
 	Size frameSize;					// frame size for processing
 	Rect searchROI;					// searching area
 
-	int departuring;				// departure condition. -1:left, 0:mid, 1:right
+	int departure;				    // departure condition. -1:left, 0:mid, 1:right
 	deque<int> dDirection;		    // departure index
 	
 	double transM[9];				// projection matrix
@@ -84,31 +84,34 @@ private:
 	void initTransMatrix();
 	
 	// process()
-	Rect frameInit();
+	void frameInit();
 	void getCandidatePoints();
 	void getCannyArea();
 	void getCandidateLines();
+	void getTrackedLines();
+	void nextFrame();
 
+	// for getCannyArea()
 	void processMask(Mat& mask, vector<Point>& points);		
 	void plotQuadMask(Mat& mask, Vec4f line);
 	void delErrorPoints(vector<Point>& ps0, vector<Point>& ps);
 	
-	void singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Mat& GD, vector<Point>& fitPointsU, vector<Point>& fitPointsD, Point move);
+	// for getCandidateLines()
+	void singleSideLines(Rect area, Vec4f (&fitLines)[2], vector<Point>& fitPointsU, vector<Point>& fitPointsD, Point move);
+	int binSplitLaneArea();
 
-	// 车道初选
-	
-	
-	int binSplitLaneArea(Mat& frame, vector<Point>& ps);	// 将图像和原始点集划分为左右两部分
-
-	// 跟踪修正
-	void getTrackedLines(Mat& frame);	
-	int parallelTest(Vec4f line0, vector<Vec4f>& lines, Size frameSize, bool confirmed);	// 根据当前帧与上一帧结果之间的平行度进行筛选
-	bool parallelIndex(Vec4f line0, Vec4f line1, Size frameSize);	// 计算两根直线之间的平行度
-	Vec4f mergeLines(Vec4f line0, vector<Vec4f>& lines, int pTest, int relia0, int relia1);	// 根据当前帧与上一帧结果之间的平行度进行筛选
-	Vec4f getOtherSideLane(Vec4f cLane, double deviation, Size frameSize);	// 补充单边缺失的情况
+	// for getTrackedLines()
+	int parallelTest(Vec4f line0, Vec4f(&lines)[2], bool tracked);	// select the result according to the parallel test
+	bool parallelIndex(Vec4f line0, Vec4f line1);	// calc the parallel index
+	Vec4f mergeLines(Vec4f line0, Vec4f(&lines)[2], int pTest, int relia0, int relia1);
+	Vec4f getOtherSideLane(Vec4f cLane, double deviation);
 	void calcDepartDirection(deque<int>& dDirection);
 
-	// 其他
+	// for nextFrame();
+	
+	
+
+	// other
 	Point2f pointInLine(Vec4f cLine, int p, bool isY = true);		//求直线上的一点
 	int dist2line(Point pt, Vec4f& lane);	//计算点到直线的距离
 	Point LaneDetection::crossPoint(Vec4f line1, Vec4f line2);	//求交点
@@ -117,7 +120,7 @@ private:
 	void getProjectedPoints(vector<Point>& lanePoints, vector<Point>& projectedPoints, double transM[]);	// 一组点的投影
 	Vec4f mergeTwoLines(Vec4f line0, Vec4f line1, float p);
 
-	// 绘图显示
+	// for drawLanes()
 	void plotLanes(Mat& frame, Vec4f& leftLane, Vec4f& rightLane);	//双侧线
 	void plotLanes(Mat& frame, Vec4f& lane);	//单侧线
 	void plotSingleLine(Mat& frame, Vec4f& plotLine, double dL);

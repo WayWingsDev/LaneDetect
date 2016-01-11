@@ -17,10 +17,8 @@ void LaneDetection::initSys()
 	moveWindow("LD", 520, 30);
 	namedWindow("Canny", 1);
 	moveWindow("Canny", 900, 30);
-	namedWindow("GradientU", 1);
-	moveWindow("GradientU", 520, 350);
-	namedWindow("GradientD", 1);
-	moveWindow("GradientD", 900, 350);
+	namedWindow("Gradient", 1);
+	moveWindow("Gradient", 520, 350);
 	namedWindow("Lines", 1);
 	moveWindow("Lines", 520, 670);
 	namedWindow("Mask", 1);
@@ -42,177 +40,38 @@ void LaneDetection::process(Mat& frame)
 {
 	OFrame = frame.clone();		// copy of the origin frame
 
-	searchROI = frameInit();
+	frameInit();
 	getCandidatePoints();
 	getCannyArea();
-
-	/*
-	if (departuring == 0)
-	{
-		
-		// 分类器搜索
-		getCandidatePoints(SFrame, lanePoints);
-		// 边缘检测
-		getCannyArea(SFrame, edgeFrame, searchROI, lanePoints);
-		// 车道初选
-		getCandidateLines(SFrame, lanePoints, fitPoints);
-		// 跟踪修正
-		getTrackedLines(SFrame);		
-	}
-	else						//偏离换道状态
-	{
-
-		// 分类器搜索
-		getCandidatePoints(SFrame, lanePoints);
-		// 边缘检测
-		getCannyArea(SFrame, edgeFrame, searchROI, lanePoints);
-		// 车道初选
-		getCandidateLinesDepart(SFrame, lanePoints, fitPoints);
-		// 跟踪修正
-		getTrackedLinesDepart(SFrame);
-	}
-	*/
+	getCandidateLines();
+	getTrackedLines();
+	nextFrame();
 }
 
 void LaneDetection::drawLanes(Mat& frame)
 {
-	imshow("Mask", mask);
-	imshow("Canny", edge);
-	
-	/*
-	if (departuring == 0)
-	{
-		//初选线
-		Mat linesFrame = Mat::zeros(SFrame.size(), CV_8U);
+	Mat linesFrame = Mat::zeros(SFrame.size(), CV_8U);
+	Mat frameShow = SFrame.clone();
+	if (departure == 0)
+	{	
 		plotSingleLine(linesFrame, fitLinesL[0], 500);
 		plotSingleLine(linesFrame, fitLinesL[1], 500);
 		plotSingleLine(linesFrame, fitLinesR[0], 500);
 		plotSingleLine(linesFrame, fitLinesR[1], 500);
-		imshow("Lines", linesFrame);
-
-		//最终结果
-		Mat frameShow = SFrame.clone();
-		plotLanes(frameShow, lanesPV.LLane, lanesPV.RLane);
-		imshow("LD", frameShow);
+		plotLanes(frameShow, lanesPV.LLane, lanesPV.RLane);		
 	}
 	else
 	{
-		//初选线
-		Mat linesFrame = Mat::zeros(SFrame.size(), CV_8U);
 		plotSingleLine(linesFrame, fitLinesM[0], 500);
 		plotSingleLine(linesFrame, fitLinesM[1], 500);
-		imshow("Lines", linesFrame);
-
-		//最终结果
-		Mat frameShow = SFrame.clone();
 		plotLanes(frameShow, lanesPV.MLane);
-		imshow("LD", frameShow);
 	}
-	*/
-}
-
-// 下帧预测
-void LaneDetection::nextFrame()		
-{
-	//更新偏离状态的指示
-	int sum = accumulate(begin(dDirection), end(dDirection), 0.0);
-	//cout << "Sum = " << sum << endl; 
-
-	if (departuring == 0)				//当前为正常行驶
-	{
-		float Lx = abs(lanesPV.LLane[0]);
-		float Rx = abs(lanesPV.RLane[0]);
-
-		if (Lx > 0 && Lx < 0.60 && Rx > 0.60 && sum < -4)		// 向左偏离趋势大
-		{
-			departuring = -1;
-			lanesPV.MLane_p = lanesPV.LLane;
-			//cout << "MLane_p = " << lanesPV.MLane_p << endl;
-		}
-		else if (Rx > 0 && Rx < 0.60 && Lx > 0.60 && sum > 4)	// 向右偏离趋势大
-		{		
-			departuring = 1;
-			lanesPV.MLane_p = lanesPV.RLane;
-		}
-		else
-		{
-			departuring = 0;
-		}
-
-		if (departuring != 0)			// 从正常向偏离转变，重置参数
-		{
-			lanesPV.MLane = Vec4f(0, 0, 0, 0);
-			//lanesPV.MLane_p = Vec4f(0, 0, 0, 0);
-			
-			if (departuring == -1)
-			{
-				lanesPV.confirmed[0] = lanesPV.confirmed[1];
-			}			
-		}
-	}
-	else if (departuring == -1)			// 当前为向左偏离
-	{
-		float Mx = lanesPV.MLane[0];
-		float My = lanesPV.MLane[1];
-
-		if (Mx > 0.4)
-		{
-			if (My > 0 && sum < -4)			// 完成向左跨道
-			{
-				departuring = 0;
-
-				lanesPV.LLane = Vec4f(0, 0, 0, 0);
-				lanesPV.LLane_p = Vec4f(0, 0, 0, 0);
-				lanesPV.RLane = Vec4f(0, 0, 0, 0);
-				lanesPV.RLane_p = lanesPV.MLane;
-				lanesPV.confirmed[1] = lanesPV.confirmed[0];
-				lanesPV.confirmed[0] = false;
-			}
-			else if (My < 0 && sum > 4)		// 退回当前车道
-			{
-				departuring = 0;
-
-				lanesPV.LLane = Vec4f(0, 0, 0, 0);
-				lanesPV.LLane_p = lanesPV.MLane;
-				lanesPV.RLane = Vec4f(0, 0, 0, 0);
-				lanesPV.RLane_p = Vec4f(0, 0, 0, 0);
-				lanesPV.confirmed[1] = false;
-			}
-		}
-	}
-	else if (departuring == 1)			// 当前为向右偏离
-	{
-		float Mx = lanesPV.MLane[0];
-		float My = lanesPV.MLane[1];
-
-		if (Mx > 0.4)
-		{
-			if (My < 0 && sum > 4)			// 完成向右跨道
-			{
-				departuring = 0;
-
-				lanesPV.LLane = Vec4f(0, 0, 0, 0);
-				lanesPV.LLane_p = lanesPV.MLane; 
-				lanesPV.RLane = Vec4f(0, 0, 0, 0);
-				lanesPV.RLane_p = Vec4f(0, 0, 0, 0);
-				lanesPV.confirmed[1] = false;
-				
-			}
-			else if (My > 0 && sum < -4)		// 退回当前车道
-			{
-				departuring = 0;
-
-				lanesPV.LLane = Vec4f(0, 0, 0, 0);
-				lanesPV.LLane_p = Vec4f(0, 0, 0, 0);
-				lanesPV.RLane = Vec4f(0, 0, 0, 0);
-				lanesPV.RLane_p = lanesPV.MLane;
-				lanesPV.confirmed[1] = lanesPV.confirmed[0];
-				lanesPV.confirmed[0] = false;
-			}
-		}
-
-	}
-	//cout << "Departure: " << departuring << endl;
+	
+	imshow("Mask", mask);
+	imshow("Canny", edge);
+	imshow("Gradient", gradient);
+	imshow("Lines", linesFrame);
+	imshow("LD", frameShow);
 }
 
 // private part
@@ -263,27 +122,24 @@ void LaneDetection::initTransMatrix()
 	}
 }
 
-Rect LaneDetection::frameInit()
+void LaneDetection::frameInit()
 {
 	cvtColor(OFrame, OFrame, CV_BGR2GRAY);
 	resize(OFrame, SFrame, Size(OFrame.cols / 2, OFrame.rows / 2));
 	SFrame = SFrame(Rect(0, 10, SFrame.cols - 10, SFrame.rows - 10));
 	frameSize = SFrame.size();
 	// define searchROI
-	if (departuring == 0)
+	if (departure == 0)
 	{
-		Rect searchROI(0, Y_SKYLINE*SFrame.rows, SFrame.cols, (1 - Y_SKYLINE - 0.1)*SFrame.rows);
-		return searchROI;
+		searchROI = Rect(0, Y_SKYLINE*SFrame.rows, SFrame.cols, (1 - Y_SKYLINE - 0.1)*SFrame.rows);
 	}
-	else if (departuring == -1)
+	else if (departure == -1)
 	{
-		Rect searchROI(0.25*SFrame.cols, Y_SKYLINE*SFrame.rows, 0.75*SFrame.cols, (1 - Y_SKYLINE)*SFrame.rows);
-		return searchROI;
+		searchROI = Rect(0.25*SFrame.cols, Y_SKYLINE*SFrame.rows, 0.75*SFrame.cols, (1 - Y_SKYLINE)*SFrame.rows);
 	}
-	else if (departuring == 1)
+	else if (departure == 1)
 	{
-		Rect searchROI(0.25*SFrame.cols, Y_SKYLINE*SFrame.rows, 0.75*SFrame.cols, (1 - Y_SKYLINE)*SFrame.rows);
-		return searchROI;
+		searchROI = Rect(0.25*SFrame.cols, Y_SKYLINE*SFrame.rows, 0.75*SFrame.cols, (1 - Y_SKYLINE)*SFrame.rows);
 	}
 }
 
@@ -307,7 +163,7 @@ void LaneDetection::getCannyArea()
 {
 	// mask
 	mask = Mat::zeros(frameSize, CV_8U);
-	if (departuring == 0)
+	if (departure == 0)
 	{
 		delErrorPoints(lanePoints, selectedPoints);		
 		processMask(mask, selectedPoints);
@@ -429,53 +285,83 @@ void LaneDetection::getCandidateLines()
 	tanFrame = yFrame / xFrame;
 
 	Mat element(3, 3, CV_8U, Scalar(1));
-	dilate(edgeFrame, edge, element);
+	dilate(edge, edge, element);
 
 	// state of lane keeping 
 	gradientU = Mat::zeros(searchROI.height, searchROI.width, CV_8U);
 	gradientD = Mat::zeros(searchROI.height, searchROI.width, CV_8U);
-	vector<Point> fitPointsLU;
-	vector<Point> fitPointsLD;
-	vector<Point> fitPointsRU;
-	vector<Point> fitPointsRD;
+	
+	// departing conditons
+	switch (departure)
+	{
+	case 0:
+	{
+		vector<Point> fitPointsLU;
+		vector<Point> fitPointsLD;
+		vector<Point> fitPointsRU;
+		vector<Point> fitPointsRD;
 
-	int xDivide = SFrame.cols / 2;
-	int dx = SFrame.cols - xDivide;
-	int y1 = searchROI.y;
-	int dy = searchROI.height;
+		int xDivide = binSplitLaneArea();
+		int dx = SFrame.cols - xDivide;
+		int y1 = searchROI.y;
+		int dy = searchROI.height;
 
-	Rect areaL(0, 0, xDivide, dy);
-	Rect areaR(xDivide, 0, dx, dy);
-	Mat GLU = gradientU(areaL);
-	Mat GLD = gradientD(areaL);
-	Mat GRU = gradientU(areaR);
-	Mat GRD = gradientD(areaR);
+		Rect areaL(0, 0, xDivide, dy);
+		Rect areaR(xDivide, 0, dx, dy);
 
-	singleSideLines(areaL, fitLinesL, GLU, GLD, fitPointsLU, fitPointsLD, Point(0, y1));
-	singleSideLines(areaR, fitLinesR, GRU, GRD, fitPointsRU, fitPointsRD, Point(xDivide, y1));
+		singleSideLines(areaL, fitLinesL, fitPointsLU, fitPointsLD, Point(0, y1));
+		singleSideLines(areaR, fitLinesR, fitPointsRU, fitPointsRD, Point(xDivide, y1));
 
-	lanesPV.relia[0] = fitPointsLU.size();
-	lanesPV.relia[1] = fitPointsLD.size();
-	lanesPV.relia[2] = fitPointsRU.size();
-	lanesPV.relia[3] = fitPointsRD.size();
+		lanesPV.relia[0] = fitPointsLU.size();
+		lanesPV.relia[1] = fitPointsLD.size();
+		lanesPV.relia[2] = fitPointsRU.size();
+		lanesPV.relia[3] = fitPointsRD.size();
+		fitPoints.clear();
+		fitPoints.insert(fitPoints.end(), fitPointsLU.begin(), fitPointsLU.end());
+		fitPoints.insert(fitPoints.end(), fitPointsLD.begin(), fitPointsLD.end());
+		fitPoints.insert(fitPoints.end(), fitPointsRU.begin(), fitPointsRU.end());
+		fitPoints.insert(fitPoints.end(), fitPointsRD.begin(), fitPointsRD.end());
+		
+		break;
+	}
 
-	fitPoints.clear();
-	fitPoints.insert(fitPoints.end(), fitPointsLU.begin(), fitPointsLU.end());
-	fitPoints.insert(fitPoints.end(), fitPointsLD.begin(), fitPointsLD.end());
-	fitPoints.insert(fitPoints.end(), fitPointsRU.begin(), fitPointsRU.end());
-	fitPoints.insert(fitPoints.end(), fitPointsRD.begin(), fitPointsRD.end());
+	case -1:
+	case 1:
+	{
+		vector<Point> fitPointsL;
+		vector<Point> fitPointsR;
 
-	imshow("GradientU", gradientU);
-	imshow("GradientD", gradientD);
+		Rect area(0, 0, searchROI.x, searchROI.y);
+
+		singleSideLines(area, fitLinesM, fitPointsL, fitPointsR, Point(searchROI.x, searchROI.y));
+
+		lanesPV.relia[0] = fitPointsL.size();
+		lanesPV.relia[1] = fitPointsR.size();
+		fitPoints.clear();
+		fitPoints.insert(fitPoints.end(), fitPointsL.begin(), fitPointsL.end());
+		fitPoints.insert(fitPoints.end(), fitPointsR.begin(), fitPointsR.end());
+
+		break;
+	}
+	}
+
+	addWeighted(gradientU, 0.5, gradientD, 0.5, 0.0, gradient);
+
+	// imshow("GradientU", gradientU);
+	// imshow("GradientD", gradientD);
 }
 
-void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Mat& GD, vector<Point>& fitPointsU, vector<Point>& fitPointsD, Point move)
+void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], vector<Point>& fitPointsU, vector<Point>& fitPointsD, Point move)
 {
 	fitPointsU.clear();
 	fitPointsD.clear();
 	
+	Mat GU = gradientU(area);
+	Mat GD = gradientD(area);
+
 	// area selecting
 	Mat areaEdge = edge(searchROI)(area);
+	Mat areaX = xFrame(area);
 	Mat areaY = yFrame(area);
 	Mat areaG = gFrame(area);
 	Mat areaTan = tanFrame(area);
@@ -495,9 +381,9 @@ void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Ma
 	for (unsigned j = 0; j < areaTan.rows; j++)
 	{
 		pTan = areaTan.ptr<float>(j);
-		pG = areaG.ptr<float>(j);		
+		pG = areaG.ptr<float>(j);
 		pE = areaEdge.ptr<uchar>(j);
-		pSP = selectedPoints.ptr<uchar>(j);
+		pSP = selected.ptr<uchar>(j);
 		for (unsigned i = 0; i < areaTan.cols; i++)
 		{
 			if (pE[i]>200)
@@ -511,30 +397,47 @@ void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Ma
 		}
 	}
 
-	//寻找梯度最大方向
+	// search for the direction of the largest gradient
 	float maxGradient = 0;
 	int maxIndex = 0;
 	for (unsigned i = 0; i < 9; i++)
 	{
-		if (gHist[i]>maxGradient)
+		if (gHist[i] > maxGradient)
 		{
 			maxGradient = gHist[i];
 			maxIndex = i;
 		}
 	}
+	
+	Mat areaD;
+	switch (departure)
+	{
+	case 0:
+	{
+		areaD = areaY;
+		break;
+	}
 
-	//修正梯度结果图像
-	//float averGradient = maxGradient / float(gNumHist[maxIndex]);
+	case -1:
+	case 1:
+	{
+		areaD = areaX;
+		break;
+	}
+	}
+
+
+	// refine the gradient
 	if (maxGradient > 0)
 	{
-		for (unsigned j = 0; j < selectedPoints.rows; j++)
+		for (unsigned j = 0; j < selected.rows; j++)
 		{
-			pY = areaY.ptr<float>(j);
+			pY = areaD.ptr<float>(j);
 			pG = areaG.ptr<float>(j);
-			pSP = selectedPoints.ptr<uchar>(j);
+			pSP = selected.ptr<uchar>(j);
 			pSPU = GU.ptr<uchar>(j);
 			pSPD = GD.ptr<uchar>(j);
-			for (unsigned i = 0; i < selectedPoints.cols; i++)
+			for (unsigned i = 0; i < selected.cols; i++)
 			{
 				if (pSP[i] == maxIndex && pY[i] > 0)
 				{
@@ -556,30 +459,28 @@ void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Ma
 		}
 	}
 
-	//计算拟合直线
+	// calc the line fitting
 	Vec4f fitLinesU;
 	Vec4f fitLinesD;
-	Mat allBlack = Mat::zeros(GU.size(), GU.type());
+	//Mat allBlack = Mat::zeros(GU.size(), GU.type());
 	if (fitPointsU.size() > 1000)
 	{
-		allBlack.copyTo(GU);
+		//allBlack.copyTo(GU);
 		fitPointsU.clear();
 	}
 	if (fitPointsD.size() > 1000)
 	{
-		allBlack.copyTo(GD);
+		//allBlack.copyTo(GD);
 		fitPointsD.clear();
 	}
 
-
+	// weighted least-square fitting
 	if (fitPointsU.size() > 5)
 	{
-		//加权最小二乘法，越靠下的点权重越大
 		fitLineWeighted(fitPointsU, fitLinesU);
 	}
 	if (fitPointsD.size() > 5)
 	{
-		//加权最小二乘法，越靠下的点权重越大
 		fitLineWeighted(fitPointsD, fitLinesD);
 	}
 
@@ -587,119 +488,154 @@ void LaneDetection::singleSideLines(Rect area, Vec4f (&fitLines)[2], Mat& GU, Ma
 	fitLines[1] = fitLinesD;
 }
 
-int LaneDetection::binSplitLaneArea(Mat& frame, vector<Point>& ps)
+int LaneDetection::binSplitLaneArea()
 {
-	return frame.cols / 2;
+	return SFrame.cols / 2;
 }
 
-// 跟踪修正
-void LaneDetection::getTrackedLines(Mat& frame)
+// target tracking
+void LaneDetection::getTrackedLines()
 {
-	//double t0;
-	//t0 = (double)cvGetTickCount();
-	
-	Vec4f LLane;
-	Vec4f RLane;
-
-	int nCols = frame.cols;
-	int nRows = frame.rows;
-
-	lanesPV.tracked[0] = false;
-	lanesPV.tracked[1] = false;
-
-	//检查结果之间的平行度
-	int leftP;
-	int rightP;
-	leftP = parallelTest(lanesPV.LLane_p, fitLinesL, frame.size(), lanesPV.confirmed[0]);
-	rightP = parallelTest(lanesPV.RLane_p, fitLinesR, frame.size(), lanesPV.confirmed[1]);
-
-	//输出初步结果
-	//cout << "Fit Line relia: " << lanesPV.relia[0] << ", " << lanesPV.relia[1] << ", " << lanesPV.relia[2] << ", " << lanesPV.relia[3] << endl;
-	LLane = mergeLines(lanesPV.LLane_p, fitLinesL, leftP, lanesPV.relia[0], lanesPV.relia[1]);
-	RLane = mergeLines(lanesPV.RLane_p, fitLinesR, rightP, lanesPV.relia[2], lanesPV.relia[3]);
-
-	//cout << "LLane: " << LLane << endl;
-	//cout << "RLane: " << RLane << endl;
-
-	//更新tracked参数
-	if (LLane[0] != 0 && LLane[1] != 0)
+	switch (departure)
 	{
-		lanesPV.tracked[0] = true;
-	}
-	if (RLane[0] != 0 && RLane[1] != 0)
+	case 0:
 	{
-		lanesPV.tracked[1] = true;
-	}
+		Vec4f LLane;
+		Vec4f RLane;
 
-	//cout << "Tracked: " << lanesPV.tracked[0] << ", " << lanesPV.tracked[1] << endl;
+		int nCols = SFrame.cols;
+		int nRows = SFrame.rows;
 
-	//补充单边缺失的情况
-	if (lanesPV.tracked[0] == true && lanesPV.tracked[1] == false)	//左有右无
-	{
-		if (lanesPV.relia[0] + lanesPV.relia[1] > 150)
-		{
-			RLane = getOtherSideLane(LLane, 110, frame.size());
-		}
-	}
-
-	if (lanesPV.tracked[0] == false && lanesPV.tracked[1] == true)	//左无右有
-	{
-		if (lanesPV.relia[2] + lanesPV.relia[3] > 150)
-		{
-			LLane = getOtherSideLane(RLane, -110, frame.size());
-		}
-	}
-
-	//cout << "LLane: " << LLane << endl;
-	//cout << "RLane: " << RLane << endl;
-
-	//跟踪上一帧目标
-	if (lanesPV.LLane_p[0] != 0 && lanesPV.confirmed[0])
-	{
-		lanesPV.LLane = 0.5*LLane + 0.5*lanesPV.LLane_p;
-	}
-	else
-	{
-		lanesPV.LLane = LLane;
-	}
-
-	if (lanesPV.RLane_p[0] != 0 && lanesPV.confirmed[1])
-	{
-		lanesPV.RLane = 0.5*RLane + 0.5*lanesPV.RLane_p;
-	}
-	else
-	{
-		lanesPV.RLane = RLane;
-	}
-
-	//计算偏离趋势
-	calcDepartDirection(dDirection);
-
-	//cout << "LLane: " << lanesPV.LLane << endl;
-	//cout << "RLane: " << lanesPV.RLane << endl;
-
-	//更新跟踪参数
-	lanesPV.LLane_p = lanesPV.LLane;
-	lanesPV.RLane_p = lanesPV.RLane;
-	if (leftP < 3 || leftP == 4)
-	{
-		lanesPV.confirmed[0] = true;
-	}
-	else
-	{
 		lanesPV.confirmed[0] = false;
-	}
-	if (rightP < 3 || rightP == 4)
-	{
-		lanesPV.confirmed[1] = true;
-	}
-	else
-	{
 		lanesPV.confirmed[1] = false;
-	}
-	//cout << "Confirmed: " << lanesPV.confirmed[0] << ", " << lanesPV.confirmed[1] << endl;
 
-	//鸟瞰视图
+		int leftP;
+		int rightP;
+		leftP = parallelTest(lanesPV.LLane_p, fitLinesL, lanesPV.tracked[0]);
+		rightP = parallelTest(lanesPV.RLane_p, fitLinesR, lanesPV.tracked[1]);
+
+		LLane = mergeLines(lanesPV.LLane_p, fitLinesL, leftP, lanesPV.relia[0], lanesPV.relia[1]);
+		RLane = mergeLines(lanesPV.RLane_p, fitLinesR, rightP, lanesPV.relia[2], lanesPV.relia[3]);
+
+		// update the parameter: confirmed
+		if (LLane[0] != 0 && LLane[1] != 0)
+		{
+			lanesPV.confirmed[0] = true;
+		}
+		if (RLane[0] != 0 && RLane[1] != 0)
+		{
+			lanesPV.confirmed[1] = true;
+		}
+
+		// get the other side lane
+		if (lanesPV.confirmed[0] == true && lanesPV.confirmed[1] == false)	// only left
+		{
+			if (lanesPV.relia[0] + lanesPV.relia[1] > 150)
+			{
+				RLane = getOtherSideLane(LLane, 110);
+			}
+		}
+
+		if (lanesPV.confirmed[0] == false && lanesPV.confirmed[1] == true)	// only right
+		{
+			if (lanesPV.relia[2] + lanesPV.relia[3] > 150)
+			{
+				LLane = getOtherSideLane(RLane, -110);
+			}
+		}
+
+		// track the lane target
+		if (lanesPV.LLane_p[0] != 0 && lanesPV.tracked[0])
+		{
+			lanesPV.LLane = 0.5*LLane + 0.5*lanesPV.LLane_p;
+		}
+		else
+		{
+			lanesPV.LLane = LLane;
+		}
+
+		if (lanesPV.RLane_p[0] != 0 && lanesPV.confirmed[1])
+		{
+			lanesPV.RLane = 0.5*RLane + 0.5*lanesPV.RLane_p;
+		}
+		else
+		{
+			lanesPV.RLane = RLane;
+		}
+
+		calcDepartDirection(dDirection);
+
+		//cout << "LLane: " << lanesPV.LLane << endl;
+		//cout << "RLane: " << lanesPV.RLane << endl;
+
+		// update the parameter: tracked
+		lanesPV.LLane_p = lanesPV.LLane;
+		lanesPV.RLane_p = lanesPV.RLane;
+		if (leftP < 3 || leftP == 4)
+		{
+			lanesPV.tracked[0] = true;
+		}
+		else
+		{
+			lanesPV.tracked[0] = false;
+		}
+		if (rightP < 3 || rightP == 4)
+		{
+			lanesPV.tracked[1] = true;
+		}
+		else
+		{
+			lanesPV.tracked[1] = false;
+		}
+		break;
+	}
+
+	case -1:
+	case 1:
+	{
+		Vec4f MLane;
+
+		int nCols = SFrame.cols;
+		int nRows = SFrame.rows;
+
+		lanesPV.tracked[0] = false;
+
+		int midP = parallelTest(lanesPV.MLane_p, fitLinesM, lanesPV.confirmed[0]);
+		MLane = mergeLines(lanesPV.MLane_p, fitLinesM, midP, lanesPV.relia[0], lanesPV.relia[1]);
+
+		if (MLane[0] != 0 && MLane[1] != 0)
+		{
+			lanesPV.tracked[0] = true;
+		}
+
+		if (lanesPV.MLane_p[0] != 0 && lanesPV.tracked[0])
+		{
+			lanesPV.MLane = mergeTwoLines(MLane, lanesPV.MLane_p, 0.8);
+			//lanesPV.MLane = 0.8*MLane + 0.2*lanesPV.MLane_p;
+		}
+		else
+		{
+			lanesPV.MLane = MLane;
+		}
+
+		calcDepartDirection(dDirection);
+
+		// update
+		lanesPV.MLane_p = lanesPV.MLane;
+		if (midP < 3 || midP == 4)
+		{
+			lanesPV.confirmed[0] = true;
+		}
+		else
+		{
+			lanesPV.confirmed[0] = false;
+		}
+
+		break;
+	}
+	}
+
+	// bird's view
 	Mat tFrame = Mat::zeros(Size(300, 720), CV_8UC3);
 	vector<Point> projectedPoints;	
 	getProjectedPoints(fitPoints, projectedPoints, transM);
@@ -708,13 +644,9 @@ void LaneDetection::getTrackedLines(Mat& frame)
 		circle(tFrame, projectedPoints[i], 3, Scalar(255, 0, 0), (-1));
 	}
 	imshow("BV", tFrame);
-
-	//t0 = (double)cvGetTickCount() - t0;
-	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	//cout << "时间消耗：Track Time = " << t0 << " ms" << endl;
 }
 
-int LaneDetection::parallelTest(Vec4f line0, vector<Vec4f>& lines, Size frameSize, bool confirmed)
+int LaneDetection::parallelTest(Vec4f line0, Vec4f(&lines)[2], bool tracked)
 {
 	// result
 	// 0: 0、1线都与上一帧结果平行
@@ -726,17 +658,17 @@ int LaneDetection::parallelTest(Vec4f line0, vector<Vec4f>& lines, Size frameSiz
 
 	int result = 0;
 
-	if (confirmed && line0[0] != 0 && line0[1] != 0)		//存在上一帧目标
+	if (tracked && line0[0] != 0 && line0[1] != 0)		//存在上一帧目标
 	{
 		bool p0 = false;
 		bool p1 = false;
 		if (lines[0][0] != 0 && lines[0][1] != 0)	//0线存在
 		{
-			p0 = parallelIndex(line0, lines[0], frameSize);		//0线与上一帧的平行关系
+			p0 = parallelIndex(line0, lines[0]);		//0线与上一帧的平行关系
 		}
 		if (lines[1][0] != 0 && lines[1][1] != 0)	//1线存在
 		{
-			p1 = parallelIndex(line0, lines[1], frameSize);		//1线与上一帧的平行关系
+			p1 = parallelIndex(line0, lines[1]);		//1线与上一帧的平行关系
 		}
 
 		if (!p0)
@@ -757,23 +689,20 @@ int LaneDetection::parallelTest(Vec4f line0, vector<Vec4f>& lines, Size frameSiz
 	else if (lines[0][0] != 0 && lines[1][0] != 0)
 	{
 		result = 4;
-		bool p = parallelIndex(lines[0], lines[1], frameSize);
+		bool p = parallelIndex(lines[0], lines[1]);
 		if (!p)
 		{
 			result = 5;
 		}
 	}
 
-	//cout << "ParallelTest = " << result << endl;
-
 	return result;
-
 }
 
-bool LaneDetection::parallelIndex(Vec4f line0, Vec4f line1, Size frameSize)
+bool LaneDetection::parallelIndex(Vec4f line0, Vec4f line1)
 {
-	double pIndex = 0;	//平行度量
-	double dIndex = 0;	//距离度量
+	double pIndex = 0;	// gradient
+	double dIndex = 0;	// distance
 
 	int dy = frameSize.height;
 	Point p00 = pointInLine(line0, dy / 2);
@@ -790,8 +719,6 @@ bool LaneDetection::parallelIndex(Vec4f line0, Vec4f line1, Size frameSize)
 
 	pIndex = s1 > s2 ? d1 : d2;
 	dIndex = abs(dist0 - dist1);
-	//cout << pIndex << ", " << dIndex << endl;
-	//cout << 200 * pIndex + dIndex << endl;
 
 	bool isParallel = true;
 
@@ -803,7 +730,7 @@ bool LaneDetection::parallelIndex(Vec4f line0, Vec4f line1, Size frameSize)
 	return isParallel;
 }
 
-Vec4f LaneDetection::mergeLines(Vec4f line0, vector<Vec4f>& lines, int pTest, int relia0, int relia1)
+Vec4f LaneDetection::mergeLines(Vec4f line0, Vec4f(&lines)[2], int pTest, int relia0, int relia1)
 {
 	Vec4f outLine;
 
@@ -864,7 +791,7 @@ Vec4f LaneDetection::mergeLines(Vec4f line0, vector<Vec4f>& lines, int pTest, in
 	return outLine;
 }
 
-Vec4f LaneDetection::getOtherSideLane(Vec4f cLane, double deviation, Size frameSize)
+Vec4f LaneDetection::getOtherSideLane(Vec4f cLane, double deviation)
 {
 	int nRows = frameSize.height;
 	int nCols = frameSize.width;
@@ -909,7 +836,7 @@ Vec4f LaneDetection::getOtherSideLane(Vec4f cLane, double deviation, Size frameS
 void LaneDetection::calcDepartDirection(deque<int>& dDirection)
 {
 	// dDirection: -1：向左偏， 0：不确定， 1：向右偏
-	if (departuring == 0)
+	if (departure == 0)
 	{
 		float alpha, alpha_p;
 		float dL = 0;
@@ -977,6 +904,109 @@ void LaneDetection::calcDepartDirection(deque<int>& dDirection)
 			dDirection.pop_front();
 		}
 	}
+}
+
+void LaneDetection::nextFrame()
+{
+	//更新偏离状态的指示
+	int sum = accumulate(begin(dDirection), end(dDirection), 0.0);
+	//cout << "Sum = " << sum << endl; 
+
+	if (departure == 0)				//当前为正常行驶
+	{
+		float Lx = abs(lanesPV.LLane[0]);
+		float Rx = abs(lanesPV.RLane[0]);
+
+		if (Lx > 0 && Lx < 0.60 && Rx > 0.60 && sum < -4)		// 向左偏离趋势大
+		{
+			departure = -1;
+			lanesPV.MLane_p = lanesPV.LLane;
+			//cout << "MLane_p = " << lanesPV.MLane_p << endl;
+		}
+		else if (Rx > 0 && Rx < 0.60 && Lx > 0.60 && sum > 4)	// 向右偏离趋势大
+		{
+			departure = 1;
+			lanesPV.MLane_p = lanesPV.RLane;
+		}
+		else
+		{
+			departure = 0;
+		}
+
+		if (departure != 0)			// 从正常向偏离转变，重置参数
+		{
+			lanesPV.MLane = Vec4f(0, 0, 0, 0);
+			//lanesPV.MLane_p = Vec4f(0, 0, 0, 0);
+
+			if (departure == -1)
+			{
+				lanesPV.confirmed[0] = lanesPV.confirmed[1];
+			}
+		}
+	}
+	else if (departure == -1)			// 当前为向左偏离
+	{
+		float Mx = lanesPV.MLane[0];
+		float My = lanesPV.MLane[1];
+
+		if (Mx > 0.4)
+		{
+			if (My > 0 && sum < -4)			// 完成向左跨道
+			{
+				departure = 0;
+
+				lanesPV.LLane = Vec4f(0, 0, 0, 0);
+				lanesPV.LLane_p = Vec4f(0, 0, 0, 0);
+				lanesPV.RLane = Vec4f(0, 0, 0, 0);
+				lanesPV.RLane_p = lanesPV.MLane;
+				lanesPV.confirmed[1] = lanesPV.confirmed[0];
+				lanesPV.confirmed[0] = false;
+			}
+			else if (My < 0 && sum > 4)		// 退回当前车道
+			{
+				departure = 0;
+
+				lanesPV.LLane = Vec4f(0, 0, 0, 0);
+				lanesPV.LLane_p = lanesPV.MLane;
+				lanesPV.RLane = Vec4f(0, 0, 0, 0);
+				lanesPV.RLane_p = Vec4f(0, 0, 0, 0);
+				lanesPV.confirmed[1] = false;
+			}
+		}
+	}
+	else if (departure == 1)			// 当前为向右偏离
+	{
+		float Mx = lanesPV.MLane[0];
+		float My = lanesPV.MLane[1];
+
+		if (Mx > 0.4)
+		{
+			if (My < 0 && sum > 4)			// 完成向右跨道
+			{
+				departure = 0;
+
+				lanesPV.LLane = Vec4f(0, 0, 0, 0);
+				lanesPV.LLane_p = lanesPV.MLane;
+				lanesPV.RLane = Vec4f(0, 0, 0, 0);
+				lanesPV.RLane_p = Vec4f(0, 0, 0, 0);
+				lanesPV.confirmed[1] = false;
+
+			}
+			else if (My > 0 && sum < -4)		// 退回当前车道
+			{
+				departure = 0;
+
+				lanesPV.LLane = Vec4f(0, 0, 0, 0);
+				lanesPV.LLane_p = Vec4f(0, 0, 0, 0);
+				lanesPV.RLane = Vec4f(0, 0, 0, 0);
+				lanesPV.RLane_p = lanesPV.MLane;
+				lanesPV.confirmed[1] = lanesPV.confirmed[0];
+				lanesPV.confirmed[0] = false;
+			}
+		}
+
+	}
+	//cout << "Departure: " << departure << endl;
 }
 
 // 其他
@@ -1184,263 +1214,263 @@ void LaneDetection::processMaskDepart(Mat& mask, vector<Point>& points)
 	plotQuadMask(mask, lanesPV.MLane_p);
 }
 
-void LaneDetection::getCandidateLinesDepart(Mat& frame, vector<Point>& ps, vector<Point>& fitPoints)
-{
-	//double t0;
-	//t0 = (double)cvGetTickCount();
-	
-	//计算灰度梯度
-	Mat frameGrey = frame(searchROI);
-	cvtColor(frameGrey, frameGrey, CV_RGB2GRAY);
-
-	//X方向
-	Mat maskX = (Mat_<char>(3, 3) << -1, 0, 1, -2, 0, 2, -1, 0, 1);
-	filter2D(frameGrey, xFrame, CV_32F, maskX);
-	Mat xFrame2 = xFrame.mul(xFrame);
-
-	//Y方向
-	Mat maskY = (Mat_<char>(3, 3) << -1, -2, -1, 0, 0, 0, 1, 2, 1);
-	filter2D(frameGrey, yFrame, CV_32F, maskY);
-	Mat yFrame2 = yFrame.mul(yFrame);
-
-	//梯度值
-	gFrame2 = xFrame2 + yFrame2;
-	sqrt(gFrame2, gFrame);
-
-	//方向值（正切值）
-	tanFrame = yFrame / xFrame;
-
-	//Canny图像预处理
-	Mat element(3, 3, CV_8U, Scalar(1));
-	dilate(edgeFrame, edge, element);
-
-	//显示梯度计算结果
-	Mat gradientL = Mat::zeros(frame.rows, frame.cols, CV_8U);
-	Mat gradientR = Mat::zeros(frame.rows, frame.cols, CV_8U);
-
-	//拟合点分组
-	vector<Point> fitPointsL;
-	vector<Point> fitPointsR;
-
-	Mat GL = gradientL(searchROI);
-	Mat GR = gradientR(searchROI);
-	Point move(searchROI.x, searchROI.y);
-
-	singleSideLinesDepart(fitLinesM, GL, GR,  fitPointsL, fitPointsR, move);
-
-	//cout << "MP: " << lanesPV.MLane_p << endl;
-	//cout << "ML: " << fitLinesM[0] << endl;
-	//cout << "MR: " << fitLinesM[1] << endl;
-
-	lanesPV.relia[0] = fitPointsL.size();
-	lanesPV.relia[1] = fitPointsR.size();
-
-	fitPoints.clear();
-	fitPoints.insert(fitPoints.end(), fitPointsL.begin(), fitPointsL.end());
-	fitPoints.insert(fitPoints.end(), fitPointsR.begin(), fitPointsR.end());
-
-	plotSingleLine(gradientL, fitLinesM[0], 500);
-	plotSingleLine(gradientR, fitLinesM[1], 500);
-
-	//t0 = (double)cvGetTickCount() - t0;
-	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	//cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
-
-	imshow("GradientU", gradientL);
-	imshow("GradientD", gradientR);
-}
-
-void LaneDetection::singleSideLinesDepart(vector<Vec4f>& fitLines, Mat& GL, Mat& GR, vector<Point>& fitPointsL, vector<Point>& fitPointsR, Point move)
-{
-	fitPointsL.clear();
-	fitPointsR.clear();
-
-	//区域选取
-	Mat areaEdge = edge(searchROI);
-	Mat areaX = xFrame;
-	Mat areaG = gFrame;
-	Mat areaTan = tanFrame;
-
-	//统计方向梯度
-	float angleStep = CV_PI / 9;
-	float gHist[9] = { 0 };
-	int gNumHist[9] = { 0 };
-	Mat selectedPoints = Mat::zeros(areaTan.rows, areaTan.cols, CV_8U);
-	float* pTan;	// Angle
-	float* pX;		// X Gradient
-	float* pG;		// Gradient
-	uchar* pSP;		// Selected Points
-	uchar* pSPL;	// Selected Points Left
-	uchar* pSPR;	// Selected Points Right
-	uchar* pE;		// Edge frame
-	for (unsigned j = 0; j < areaTan.rows; j++)
-	{
-		pTan = areaTan.ptr<float>(j);
-		pG = areaG.ptr<float>(j);
-		pE = areaEdge.ptr<uchar>(j);
-		pSP = selectedPoints.ptr<uchar>(j);
-		for (unsigned i = 0; i < areaTan.cols; i++)
-		{
-			if (pE[i]>200)
-			{
-				pTan[i] = atan(pTan[i]) + CV_PI / 2;
-				int groupIndex = pTan[i] / angleStep;
-				gHist[groupIndex] += pG[i];
-				gNumHist[groupIndex] += 1;
-				pSP[i] = groupIndex;
-			}
-		}
-	}
-
-	//寻找梯度最大方向
-	float maxGradient = 0;
-	int maxIndex = 0;
-	for (unsigned i = 0; i < 9; i++)
-	{
-		if (gHist[i]>maxGradient)
-		{
-			maxGradient = gHist[i];
-			maxIndex = i;
-		}
-	}
-
-	//修正梯度结果图像
-	//float averGradient = maxGradient / float(gNumHist[maxIndex]);
-	if (maxGradient > 0)
-	{
-		for (unsigned j = 0; j < selectedPoints.rows; j++)
-		{
-			pX = areaX.ptr<float>(j);
-			pG = areaG.ptr<float>(j);
-			pSP = selectedPoints.ptr<uchar>(j);
-			pSPL = GL.ptr<uchar>(j);
-			pSPR = GR.ptr<uchar>(j);
-			for (unsigned i = 0; i < selectedPoints.cols; i++)
-			{
-				if (pSP[i] == maxIndex && pX[i] > 0)
-				{
-					pSP[i] = 255;
-					pSPL[i] = 255;
-					fitPointsL.push_back(Point(i, j) + move);
-				}
-				else if (pSP[i] == maxIndex && pX[i] < 0)
-				{
-					pSP[i] = 255;
-					pSPR[i] = 255;
-					fitPointsR.push_back(Point(i, j) + move);
-				}
-				else
-				{
-					pSP[i] = 0;
-				}
-			}
-		}
-	}
-
-	//计算拟合直线
-	Vec4f fitLinesL;
-	Vec4f fitLinesR;
-	Mat allBlack = Mat::zeros(GL.size(), GL.type());
-	if (fitPointsL.size() > 1000)
-	{
-		allBlack.copyTo(GL);
-		fitPointsL.clear();
-	}
-	if (fitPointsR.size() > 1000)
-	{
-		allBlack.copyTo(GR);
-		fitPointsR.clear();
-	}
-
-	if (fitPointsL.size() > 5)
-	{
-		//加权最小二乘法，越靠下的点权重越大
-		//fitLineWeighted(fitPointsL, fitLinesL);
-		fitLine(fitPointsL, fitLinesL, CV_DIST_L2, 0, 0.01, 0.01);
-	}
-	if (fitPointsR.size() > 5)
-	{
-		//加权最小二乘法，越靠下的点权重越大
-		//fitLineWeighted(fitPointsR, fitLinesR);
-		fitLine(fitPointsR, fitLinesR, CV_DIST_L2, 0, 0.01, 0.01);
-	}
-
-	fitLines.clear();
-	fitLines.push_back(fitLinesL);
-	fitLines.push_back(fitLinesR);
-}
-
-void LaneDetection::getTrackedLinesDepart(Mat& frame)
-{
-	//double t0;
-	//t0 = (double)cvGetTickCount();
-	
-	Vec4f MLane;
-
-	int nCols = frame.cols;
-	int nRows = frame.rows;
-
-	lanesPV.tracked[0] = false;
-
-	//检查结果之间的平行度
-	int midP = parallelTest(lanesPV.MLane_p, fitLinesM, frame.size(), lanesPV.confirmed[0]);
-
-	//输出初步结果
-	MLane = mergeLines(lanesPV.MLane_p, fitLinesM, midP, lanesPV.relia[0], lanesPV.relia[1]);
-
-	//cout << "Ptest:" << midP << endl;
-	//cout << "MLane: " << MLane << endl;
-
-	//更新tracked参数
-	if (MLane[0] != 0 && MLane[1] != 0)
-	{
-		lanesPV.tracked[0] = true;
-	}
-
-	//cout << "Tracked: " << lanesPV.tracked[0]  << endl;
-
-	//跟踪上一帧目标
-	if (lanesPV.MLane_p[0] != 0 && lanesPV.confirmed[0])
-	{
-		lanesPV.MLane = mergeTwoLines(MLane, lanesPV.MLane_p, 0.8);
-		//lanesPV.MLane = 0.8*MLane + 0.2*lanesPV.MLane_p;
-	}
-	else
-	{
-		lanesPV.MLane = MLane;
-	}
-
-	//cout << "MLane: " << lanesPV.MLane << endl;
-
-	//计算偏离趋势
-	calcDepartDirection(dDirection);
-
-	//更新跟踪参数
-	lanesPV.MLane_p = lanesPV.MLane;
-
-	if (midP < 3 || midP == 4)
-	{
-		lanesPV.confirmed[0] = true;
-	}
-	else
-	{
-		lanesPV.confirmed[0] = false;
-	}
-	//cout << "Confirmed: " << lanesPV.confirmed[0] << ", " << lanesPV.confirmed[1] << endl;
-
-	//鸟瞰视图
-	Mat tFrame = Mat::zeros(Size(300, 720), CV_8UC3);
-	vector<Point> projectedPoints;
-	getProjectedPoints(fitPoints, projectedPoints, transM);
-	for (unsigned i = 0; i < projectedPoints.size(); i++)
-	{
-		circle(tFrame, projectedPoints[i], 3, Scalar(255, 0, 0), (-1));
-	}
-	imshow("BV", tFrame);
-
-	//t0 = (double)cvGetTickCount() - t0;
-	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
-	//cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
-
-}
+//void LaneDetection::getCandidateLinesDepart(Mat& frame, vector<Point>& ps, vector<Point>& fitPoints)
+//{
+//	//double t0;
+//	//t0 = (double)cvGetTickCount();
+//	
+//	//计算灰度梯度
+//	Mat frameGrey = frame(searchROI);
+//	cvtColor(frameGrey, frameGrey, CV_RGB2GRAY);
+//
+//	//X方向
+//	Mat maskX = (Mat_<char>(3, 3) << -1, 0, 1, -2, 0, 2, -1, 0, 1);
+//	filter2D(frameGrey, xFrame, CV_32F, maskX);
+//	Mat xFrame2 = xFrame.mul(xFrame);
+//
+//	//Y方向
+//	Mat maskY = (Mat_<char>(3, 3) << -1, -2, -1, 0, 0, 0, 1, 2, 1);
+//	filter2D(frameGrey, yFrame, CV_32F, maskY);
+//	Mat yFrame2 = yFrame.mul(yFrame);
+//
+//	//梯度值
+//	gFrame2 = xFrame2 + yFrame2;
+//	sqrt(gFrame2, gFrame);
+//
+//	//方向值（正切值）
+//	tanFrame = yFrame / xFrame;
+//
+//	//Canny图像预处理
+//	Mat element(3, 3, CV_8U, Scalar(1));
+//	dilate(edgeFrame, edge, element);
+//
+//	//显示梯度计算结果
+//	Mat gradientL = Mat::zeros(frame.rows, frame.cols, CV_8U);
+//	Mat gradientR = Mat::zeros(frame.rows, frame.cols, CV_8U);
+//
+//	//拟合点分组
+//	vector<Point> fitPointsL;
+//	vector<Point> fitPointsR;
+//
+//	Mat GL = gradientL(searchROI);
+//	Mat GR = gradientR(searchROI);
+//	Point move(searchROI.x, searchROI.y);
+//
+//	singleSideLinesDepart(fitLinesM, GL, GR,  fitPointsL, fitPointsR, move);
+//
+//	//cout << "MP: " << lanesPV.MLane_p << endl;
+//	//cout << "ML: " << fitLinesM[0] << endl;
+//	//cout << "MR: " << fitLinesM[1] << endl;
+//
+//	lanesPV.relia[0] = fitPointsL.size();
+//	lanesPV.relia[1] = fitPointsR.size();
+//
+//	fitPoints.clear();
+//	fitPoints.insert(fitPoints.end(), fitPointsL.begin(), fitPointsL.end());
+//	fitPoints.insert(fitPoints.end(), fitPointsR.begin(), fitPointsR.end());
+//
+//	plotSingleLine(gradientL, fitLinesM[0], 500);
+//	plotSingleLine(gradientR, fitLinesM[1], 500);
+//
+//	//t0 = (double)cvGetTickCount() - t0;
+//	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
+//	//cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
+//
+//	imshow("GradientU", gradientL);
+//	imshow("GradientD", gradientR);
+//}
+//
+//void LaneDetection::singleSideLinesDepart(vector<Vec4f>& fitLines, Mat& GL, Mat& GR, vector<Point>& fitPointsL, vector<Point>& fitPointsR, Point move)
+//{
+//	fitPointsL.clear();
+//	fitPointsR.clear();
+//
+//	//区域选取
+//	Mat areaEdge = edge(searchROI);
+//	Mat areaX = xFrame;
+//	Mat areaG = gFrame;
+//	Mat areaTan = tanFrame;
+//
+//	//统计方向梯度
+//	float angleStep = CV_PI / 9;
+//	float gHist[9] = { 0 };
+//	int gNumHist[9] = { 0 };
+//	Mat selectedPoints = Mat::zeros(areaTan.rows, areaTan.cols, CV_8U);
+//	float* pTan;	// Angle
+//	float* pX;		// X Gradient
+//	float* pG;		// Gradient
+//	uchar* pSP;		// Selected Points
+//	uchar* pSPL;	// Selected Points Left
+//	uchar* pSPR;	// Selected Points Right
+//	uchar* pE;		// Edge frame
+//	for (unsigned j = 0; j < areaTan.rows; j++)
+//	{
+//		pTan = areaTan.ptr<float>(j);
+//		pG = areaG.ptr<float>(j);
+//		pE = areaEdge.ptr<uchar>(j);
+//		pSP = selectedPoints.ptr<uchar>(j);
+//		for (unsigned i = 0; i < areaTan.cols; i++)
+//		{
+//			if (pE[i]>200)
+//			{
+//				pTan[i] = atan(pTan[i]) + CV_PI / 2;
+//				int groupIndex = pTan[i] / angleStep;
+//				gHist[groupIndex] += pG[i];
+//				gNumHist[groupIndex] += 1;
+//				pSP[i] = groupIndex;
+//			}
+//		}
+//	}
+//
+//	//寻找梯度最大方向
+//	float maxGradient = 0;
+//	int maxIndex = 0;
+//	for (unsigned i = 0; i < 9; i++)
+//	{
+//		if (gHist[i]>maxGradient)
+//		{
+//			maxGradient = gHist[i];
+//			maxIndex = i;
+//		}
+//	}
+//
+//	//修正梯度结果图像
+//	//float averGradient = maxGradient / float(gNumHist[maxIndex]);
+//	if (maxGradient > 0)
+//	{
+//		for (unsigned j = 0; j < selectedPoints.rows; j++)
+//		{
+//			pX = areaX.ptr<float>(j);
+//			pG = areaG.ptr<float>(j);
+//			pSP = selectedPoints.ptr<uchar>(j);
+//			pSPL = GL.ptr<uchar>(j);
+//			pSPR = GR.ptr<uchar>(j);
+//			for (unsigned i = 0; i < selectedPoints.cols; i++)
+//			{
+//				if (pSP[i] == maxIndex && pX[i] > 0)
+//				{
+//					pSP[i] = 255;
+//					pSPL[i] = 255;
+//					fitPointsL.push_back(Point(i, j) + move);
+//				}
+//				else if (pSP[i] == maxIndex && pX[i] < 0)
+//				{
+//					pSP[i] = 255;
+//					pSPR[i] = 255;
+//					fitPointsR.push_back(Point(i, j) + move);
+//				}
+//				else
+//				{
+//					pSP[i] = 0;
+//				}
+//			}
+//		}
+//	}
+//
+//	//计算拟合直线
+//	Vec4f fitLinesL;
+//	Vec4f fitLinesR;
+//	Mat allBlack = Mat::zeros(GL.size(), GL.type());
+//	if (fitPointsL.size() > 1000)
+//	{
+//		allBlack.copyTo(GL);
+//		fitPointsL.clear();
+//	}
+//	if (fitPointsR.size() > 1000)
+//	{
+//		allBlack.copyTo(GR);
+//		fitPointsR.clear();
+//	}
+//
+//	if (fitPointsL.size() > 5)
+//	{
+//		//加权最小二乘法，越靠下的点权重越大
+//		//fitLineWeighted(fitPointsL, fitLinesL);
+//		fitLine(fitPointsL, fitLinesL, CV_DIST_L2, 0, 0.01, 0.01);
+//	}
+//	if (fitPointsR.size() > 5)
+//	{
+//		//加权最小二乘法，越靠下的点权重越大
+//		//fitLineWeighted(fitPointsR, fitLinesR);
+//		fitLine(fitPointsR, fitLinesR, CV_DIST_L2, 0, 0.01, 0.01);
+//	}
+//
+//	fitLines.clear();
+//	fitLines.push_back(fitLinesL);
+//	fitLines.push_back(fitLinesR);
+//}
+//
+//void LaneDetection::getTrackedLinesDepart(Mat& frame)
+//{
+//	//double t0;
+//	//t0 = (double)cvGetTickCount();
+//	
+//	Vec4f MLane;
+//
+//	int nCols = frame.cols;
+//	int nRows = frame.rows;
+//
+//	lanesPV.tracked[0] = false;
+//
+//	//检查结果之间的平行度
+//	int midP = parallelTest(lanesPV.MLane_p, fitLinesM, frame.size(), lanesPV.confirmed[0]);
+//
+//	//输出初步结果
+//	MLane = mergeLines(lanesPV.MLane_p, fitLinesM, midP, lanesPV.relia[0], lanesPV.relia[1]);
+//
+//	//cout << "Ptest:" << midP << endl;
+//	//cout << "MLane: " << MLane << endl;
+//
+//	//更新tracked参数
+//	if (MLane[0] != 0 && MLane[1] != 0)
+//	{
+//		lanesPV.tracked[0] = true;
+//	}
+//
+//	//cout << "Tracked: " << lanesPV.tracked[0]  << endl;
+//
+//	//跟踪上一帧目标
+//	if (lanesPV.MLane_p[0] != 0 && lanesPV.confirmed[0])
+//	{
+//		lanesPV.MLane = mergeTwoLines(MLane, lanesPV.MLane_p, 0.8);
+//		//lanesPV.MLane = 0.8*MLane + 0.2*lanesPV.MLane_p;
+//	}
+//	else
+//	{
+//		lanesPV.MLane = MLane;
+//	}
+//
+//	//cout << "MLane: " << lanesPV.MLane << endl;
+//
+//	//计算偏离趋势
+//	calcDepartDirection(dDirection);
+//
+//	//更新跟踪参数
+//	lanesPV.MLane_p = lanesPV.MLane;
+//
+//	if (midP < 3 || midP == 4)
+//	{
+//		lanesPV.confirmed[0] = true;
+//	}
+//	else
+//	{
+//		lanesPV.confirmed[0] = false;
+//	}
+//	//cout << "Confirmed: " << lanesPV.confirmed[0] << ", " << lanesPV.confirmed[1] << endl;
+//
+//	//鸟瞰视图
+//	Mat tFrame = Mat::zeros(Size(300, 720), CV_8UC3);
+//	vector<Point> projectedPoints;
+//	getProjectedPoints(fitPoints, projectedPoints, transM);
+//	for (unsigned i = 0; i < projectedPoints.size(); i++)
+//	{
+//		circle(tFrame, projectedPoints[i], 3, Scalar(255, 0, 0), (-1));
+//	}
+//	imshow("BV", tFrame);
+//
+//	//t0 = (double)cvGetTickCount() - t0;
+//	//t0 = t0 / ((double)cvGetTickFrequency()*1000.);
+//	//cout << "时间消耗：FitLine Time = " << t0 << " ms" << endl;
+//
+//}
 
